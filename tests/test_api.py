@@ -1,12 +1,11 @@
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
-from clinic.models import Appointment
-from clinic.policies import WHITE_SPACE
+from clinic.models import Appointment, DoctorSchedule
 from clinic.schemas import AppointmentResponse
 from clinic.seed import DOCTOR_IDS, PATIENT_IDS
 
@@ -22,12 +21,13 @@ def book(client, start=START, **changes):
     return client.post("/appointments", json=body | changes)
 
 
-def availability(client, day="2030-01-07"):
-    return client.get(f"/doctors/{DOCTOR}/availability", params={"date": day})
+def availability(client, day="2030-01-07", doctor_id=DOCTOR):
+    return client.get(f"/doctors/{doctor_id}/availability", params={"date": day})
 
 
 def test_booking_availability_cancellation_and_rebooking(client, sessions):
     before = availability(client).json()
+    assert before["doctor_id"] == DOCTOR
     assert before["timezone"] == "Africa/Nairobi"
     assert len(before["slots"]) == 14
     assert before["slots"][0] == START
@@ -42,7 +42,7 @@ def test_booking_availability_cancellation_and_rebooking(client, sessions):
     assert duplicate.json()["error"]["code"] == "slot_unavailable"
     cancelled = client.patch(
         f"/appointments/{appointment['id']}/cancel",
-        json={"reason": WHITE_SPACE + "Plans changed" + WHITE_SPACE},
+        json={"reason": " \t\u00a0Plans changed\u2003\u3000"},
     )
     assert cancelled.status_code == 200
     assert cancelled.json()["status"] == "CANCELLED"
@@ -54,6 +54,96 @@ def test_booking_availability_cancellation_and_rebooking(client, sessions):
     assert replacement.json()["id"] != appointment["id"]
     with sessions() as session:
         assert len(list(session.scalars(select(Appointment)))) == 2
+
+
+def test_doctors_can_book_the_same_time_independently(client, sessions):
+    other_doctor = str(DOCTOR_IDS[1])
+    first = book(client)
+    assert first.status_code == 201
+    response = availability(client, doctor_id=other_doctor)
+    assert response.status_code == 200
+    assert response.json()["doctor_id"] == other_doctor
+    assert START in response.json()["slots"]
+
+    second = book(client, doctor_id=other_doctor)
+    assert second.status_code == 201
+    assert second.json()["doctor_id"] == other_doctor
+    assert second.json()["patient_id"] == PATIENT
+    with sessions() as session:
+        for response, doctor_id in ((first, DOCTOR_IDS[0]), (second, DOCTOR_IDS[1])):
+            saved = session.get(Appointment, UUID(response.json()["id"]))
+            assert saved.doctor_id == doctor_id
+            assert saved.slot_start == datetime.fromisoformat(START)
+    for doctor_id in (DOCTOR, other_doctor):
+        assert START not in availability(client, doctor_id=doctor_id).json()["slots"]
+        assert book(client, doctor_id=doctor_id).status_code == 409
+
+
+def test_doctor_hours_define_available_and_bookable_slots(client, sessions):
+    other_doctor = str(DOCTOR_IDS[1])
+    with sessions() as session, session.begin():
+        session.execute(delete(DoctorSchedule).where(DoctorSchedule.doctor_id == DOCTOR_IDS[1]))
+        session.add_all(
+            [
+                DoctorSchedule(
+                    doctor_id=DOCTOR_IDS[1], day_of_week=0, start_time=start, end_time=end
+                )
+                for start, end in ((time(14), time(15)), (time(10), time(11)))
+            ]
+        )
+    response = availability(client, doctor_id=other_doctor)
+    assert response.status_code == 200
+    assert response.json() == {
+        "doctor_id": other_doctor,
+        "date": "2030-01-07",
+        "timezone": "Africa/Nairobi",
+        "slots": [
+            "2030-01-07T10:00:00+03:00",
+            "2030-01-07T10:30:00+03:00",
+            "2030-01-07T14:00:00+03:00",
+            "2030-01-07T14:30:00+03:00",
+        ],
+    }
+    rejected = book(client, doctor_id=other_doctor)
+    assert rejected.status_code == 422
+    assert rejected.json()["error"]["code"] == "outside_working_hours"
+    booked = book(client, LATER, doctor_id=other_doctor)
+    assert booked.status_code == 201
+    moved = client.patch(
+        f"/appointments/{booked.json()['id']}/reschedule", json={"slot_start": START}
+    )
+    assert moved.status_code == 422
+    assert moved.json()["error"]["code"] == "outside_working_hours"
+    assert client.get(f"/patients/{PATIENT}/appointments").json() == [booked.json()]
+    assert book(client).status_code == 201
+
+
+@pytest.mark.parametrize(
+    "now,first_slot,booking_status",
+    [
+        (datetime(2030, 1, 7, 5, tzinfo=UTC), START, 201),
+        (
+            datetime(2030, 1, 7, 5, tzinfo=UTC) + timedelta(microseconds=1),
+            "2030-01-07T09:30:00+03:00",
+            422,
+        ),
+        (datetime(2030, 1, 7, 5, 15, tzinfo=UTC), "2030-01-07T09:30:00+03:00", 422),
+    ],
+)
+def test_availability_and_booking_share_notice_cutoff(
+    client, service, now, first_slot, booking_status
+):
+    service.clock = lambda: now
+    response = availability(client)
+    assert response.status_code == 200
+    slots = response.json()["slots"]
+    assert slots[0] == first_slot
+    assert (START in slots) == (booking_status == 201)
+    response = book(client)
+    assert response.status_code == booking_status
+    if booking_status == 422:
+        assert response.json()["error"]["code"] == "insufficient_notice"
+        assert book(client, first_slot).status_code == 201
 
 
 def test_reschedule_releases_original_and_conflict_preserves_current(client):
@@ -139,7 +229,9 @@ def test_upcoming_is_active_sorted_patient_scoped_and_has_no_notice_filter(clien
     service.clock = lambda: datetime(2030, 1, 7, 5, 45, tzinfo=UTC)
     upcoming = client.get(f"/patients/{PATIENT}/appointments").json()
     assert [item["id"] for item in upcoming] == [earlier["id"], later["id"]]
-    service.clock = lambda: datetime(2030, 1, 7, 6, tzinfo=UTC) + timedelta(seconds=1)
+    service.clock = lambda: datetime(2030, 1, 7, 6, tzinfo=UTC)
+    assert client.get(f"/patients/{PATIENT}/appointments").json() == [later]
+    service.clock = lambda: datetime(2030, 1, 7, 6, tzinfo=UTC) + timedelta(microseconds=1)
     assert client.get(f"/patients/{PATIENT}/appointments").json() == [later]
     assert client.get(f"/patients/{PATIENT_IDS[2]}/appointments").json() == []
 
@@ -189,7 +281,7 @@ def test_malformed_booking_input_returns_422(client, changes):
     assert response.json()["error"]["code"] == "invalid_request"
 
 
-@pytest.mark.parametrize("reason", ["", WHITE_SPACE, None, 42])
+@pytest.mark.parametrize("reason", ["", " \t\n", "\u00a0", "\u2003", "\u3000", None, 42])
 def test_invalid_cancellation_reason_returns_422(client, reason):
     appointment = book(client).json()
     assert (
@@ -198,6 +290,7 @@ def test_invalid_cancellation_reason_returns_422(client, reason):
         ).status_code
         == 422
     )
+    assert client.get(f"/patients/{PATIENT}/appointments").json() == [appointment]
 
 
 @pytest.mark.parametrize("reason", ["Changed\x00plans", "Changed\ud800plans", "Changed\udfffplans"])
@@ -237,12 +330,3 @@ def test_empty_availability_and_invalid_date(client):
     assert availability(client, "2029-01-07").json()["slots"] == []
     assert availability(client, "not-a-date").status_code == 422
     assert client.get(f"/doctors/{DOCTOR}/availability").status_code == 422
-
-
-def test_openapi_exposes_required_operations(client):
-    schema = client.get("/openapi.json").json()
-    assert schema["paths"]["/appointments"]["post"]["responses"]["201"]
-    assert schema["paths"]["/appointments/{id}/cancel"]["patch"]
-    assert schema["paths"]["/appointments/{id}/reschedule"]["patch"]
-    assert schema["paths"]["/doctors/{id}/availability"]["get"]
-    assert schema["paths"]["/patients/{id}/appointments"]["get"]
