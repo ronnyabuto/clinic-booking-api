@@ -6,6 +6,16 @@ services:
     region: frankfurt
     branch: main
     autoDeployTrigger: checksPass
+    buildFilter:
+      paths:
+        - clinic/**
+        - migrations/**
+        - scripts/**
+        - alembic.ini
+        - pyproject.toml
+        - requirements.lock
+        - .python-version
+        - render.yaml
     buildCommand: python -m pip install -r requirements.lock && python -m pip install --no-deps .
     startCommand: sh scripts/start.sh
     healthCheckPath: /health
