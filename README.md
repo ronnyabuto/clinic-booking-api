@@ -143,4 +143,37 @@ The suite uses a deterministic clock for cutoff tests, independent PostgreSQL se
 
 The [verification record](docs/section-2-verification.md) covers the PostgreSQL integration suite, concurrency checks, invalid-text regressions and dependency scan.
 
-Section 3 deployment and CI/CD, and the Section 4 AI reflection, remain to be completed. No public deployment or automatic deployment pipeline is claimed.
+Section 3 configuration is described below. The Section 4 AI reflection remains to be completed.
+
+## Section 3 — Deployment and CI/CD
+
+Repository: [ronnyabuto/clinic-booking-api](https://github.com/ronnyabuto/clinic-booking-api) (private; grant the assessment reviewers access before submission).
+
+**Public application URL: pending Render provisioning.** No live deployment has been verified yet. Use the service URL assigned by Render after the first successful deployment; append `/docs` for the interactive API and `/health` for readiness.
+
+### Render setup
+
+The [Render Blueprint](render.yaml) defines a Python web service and a PostgreSQL 17 database in Frankfurt. Both use the free plan. Python is pinned in [.python-version](.python-version), shared by Render and CI. Database access is private to Render's network; the application normalizes Render's `postgresql://` connection string to the existing `postgresql+psycopg://` driver without changing credentials or connection options.
+
+1. Connect your GitHub account to Render and allow access to this private repository.
+2. In Render, create a Blueprint from this repository, select `main`, and apply `render.yaml` after it is merged. Review both free plans before provisioning. If the workspace already has its single free database, choose another workspace or explicitly select a paid plan.
+3. Confirm the service deploys from `main` with **After CI Checks Pass**, and that the health-check path is `/health`.
+4. Wait for the deployment to become live, record its assigned public URL above, and verify availability, booking, rescheduling, cancellation and rebooking using the synthetic IDs documented earlier.
+
+The build installs the pinned dependencies and application. [scripts/start.sh](scripts/start.sh) runs migrations and the repeatable synthetic-data seed before starting Uvicorn on `0.0.0.0:$PORT`. Any migration or seed failure prevents startup. These commands run once per service process, outside the FastAPI lifecycle. Keep this demo at one instance with no concurrent seed or schedule writers. Existing synthetic IDs and appointments survive restarts; seeding does not reset appointments.
+
+Free services do not support Render's separate pre-deploy command, so this demo performs preparation in the start command. For multiple instances or runtime schedule administration, move migration/seed preparation to a separately coordinated release step. Future migrations must remain compatible with the previous application version while Render transitions traffic.
+
+`GET /health` returns `200 {"status":"ok"}` after a successful database query, or `503 {"status":"unavailable"}` on a database error. It does not reveal connection details. Successful migrations and seeding are required before the server starts; health itself checks connectivity, not schema version or seed completeness.
+
+### Pipeline and deployment branch
+
+[.github/workflows/ci.yml](.github/workflows/ci.yml) runs on **every pull request** and on **pushes to `main`**, including merged PRs. Each run starts an isolated PostgreSQL 17 service with a disposable `clinic_test` database, installs the lockfile, checks dependency consistency and Ruff lint/format, migrates a fresh database, runs the entire pytest suite including integration/concurrency tests, and runs the direct SQL constraint probes. Test results are uploaded as an artifact, including on failure when the report exists. CI uses no production database credentials.
+
+Render's `autoDeployTrigger: checksPass` links deployment to the CI result on **`main`**. After a PR merges, GitHub Actions tests the resulting commit; Render builds and deploys only after the checks pass. Failed checks prevent automatic deployment, and PR branches do not deploy to the live service. No deploy-hook or cloud API secret is required in GitHub Actions. Configure the **Tests and database checks** status as a required branch check if branch protection is available for the account's private repositories.
+
+### Operational limits
+
+This is a public synthetic-data assessment demo. Free Render web services sleep after 15 idle minutes and can take about a minute to wake; free PostgreSQL databases expire after 30 days and have no backups. Confirm the database remains valid through the submission/review period, or explicitly upgrade before expiry. The service has no authentication or patient ownership checks and must not store real patient data. Application rollbacks do not reverse database migrations; preserve schema compatibility and arrange backups before using paid hosting for persistent data.
+
+References: [Render Blueprint specification](https://render.com/docs/blueprint-spec), [CI-gated deployments and deploy commands](https://render.com/docs/deploys), [free-plan limits](https://render.com/docs/free).
