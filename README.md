@@ -71,7 +71,7 @@ Requires Python 3.12+ and PostgreSQL 17 (or Docker Compose for the database). Th
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r requirements.lock
+python -m pip install -r requirements-dev.lock
 python -m pip install --no-deps -e .
 cp .env.example .env
 docker compose up -d --wait db
@@ -82,7 +82,7 @@ uvicorn clinic.main:app --host 127.0.0.1 --port 8000
 
 Open [Swagger UI](http://127.0.0.1:8000/docs), [ReDoc](http://127.0.0.1:8000/redoc), or [OpenAPI JSON](http://127.0.0.1:8000/openapi.json). Database migrations and seeding are explicit commands, rather than actions repeated by every application worker. For an existing PostgreSQL server, set `DATABASE_URL` in `.env` to a `postgresql+psycopg://` connection string and omit Compose. Environment variables override `.env`.
 
-`requirements.lock` pins runtime and development dependencies, including transitive packages. `pyproject.toml` declares compatible ranges. `docker compose stop` preserves local database data.
+`requirements.lock` pins runtime dependencies, including transitive packages. `requirements-dev.lock` includes that file and adds the test and lint tools; use it for local development and CI. Render installs only `requirements.lock`. Update shared runtime pins in that file so both environments use the same versions. `pyproject.toml` declares compatible ranges. `docker compose stop` preserves local database data.
 
 ### Demo data
 
@@ -170,9 +170,15 @@ Free services do not support Render's separate pre-deploy command, so this demo 
 
 ### Pipeline and deployment branch
 
-[.github/workflows/ci.yml](.github/workflows/ci.yml) runs on **every pull request** and on **pushes to `main`**, including merged PRs. Each run starts an isolated PostgreSQL 17 service with a disposable `clinic_test` database, installs the lockfile, checks dependency consistency and Ruff lint/format, migrates a fresh database, runs the entire pytest suite including integration/concurrency tests, and runs the direct SQL constraint probes. Test results are uploaded as an artifact, including on failure when the report exists. CI uses no production database credentials.
+[.github/workflows/ci.yml](.github/workflows/ci.yml) runs on **every pull request** and on **pushes to `main`**, including merged PRs. Each run starts an isolated PostgreSQL 17 service with a disposable `clinic_test` database, installs `requirements-dev.lock`, checks dependency consistency and Ruff lint/format, migrates a fresh database, runs the entire pytest suite including integration/concurrency tests, and runs the direct SQL constraint probes. Pip's cache key includes both lockfiles. Test results are uploaded as an artifact, including on failure when the report exists. CI uses no production database credentials.
 
-Render's `autoDeployTrigger: checksPass` links deployment to the CI result on **`main`**. After a PR merges, GitHub Actions tests the resulting commit; Render builds and deploys only after the checks pass. Failed checks prevent automatic deployment, and PR branches do not deploy to the live service. No deploy-hook or cloud API secret is required in GitHub Actions. Configure the **Tests and database checks** status as a required branch check if branch protection is available for the account's private repositories.
+New pushes to a PR cancel its superseded CI run. Main-branch runs are serialized without cancelling the running check. CI has no path filters, so documentation and test changes receive the same checks.
+
+Render's `autoDeployTrigger: checksPass` links deployment to the CI result on **`main`**. After a PR merges, GitHub Actions tests the resulting commit; Render builds and deploys only after the checks pass. Failed checks prevent automatic deployment, and PR branches do not deploy to the live service. No deploy-hook or cloud API secret is required in GitHub Actions.
+
+Render's build filter includes application code, migrations, startup scripts, `alembic.ini`, `pyproject.toml`, the runtime lockfile, `.python-version` and `render.yaml`. Documentation, tests, CI configuration and development-tool pins alone do not trigger an application deployment. The live service is managed through the Render API rather than Blueprint sync; keep its build filter aligned with `render.yaml` when changing these paths.
+
+The current GitHub plan does not support branch protection for this private repository; `main` has no enforced merge check. If that capability becomes available, require PRs and the **Tests and database checks** status. Render's CI gate controls automatic deployment independently of merge protection.
 
 ### Operational limits
 
