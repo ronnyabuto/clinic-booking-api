@@ -61,3 +61,86 @@ References: [PostgreSQL constraints](https://www.postgresql.org/docs/current/ddl
 | Fixed duration and start-time uniqueness | Simple slot ownership; variable durations would require interval-overlap enforcement, such as an exclusion constraint |
 | Retain current state and cancelled records | Cancellation history survives; previous reschedule times and a full audit trail are not stored |
 | One application and immutable schedules | Fits five doctors without service coordination; schedule administration and operational scaling remain separate extensions |
+
+## Section 2 — API Implementation
+
+### Run locally
+
+Requires Python 3.12+ and PostgreSQL 17 (or Docker Compose for the database). The recorded checks used Python 3.14.4 and PostgreSQL 17.9. Run these commands from the project root:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.lock
+python -m pip install --no-deps -e .
+cp .env.example .env
+docker compose up -d --wait db
+alembic upgrade head
+python -m clinic.seed
+uvicorn clinic.main:app --host 127.0.0.1 --port 8000
+```
+
+Open [Swagger UI](http://127.0.0.1:8000/docs), [ReDoc](http://127.0.0.1:8000/redoc), or [OpenAPI JSON](http://127.0.0.1:8000/openapi.json). Database migrations and seeding are explicit commands, rather than actions repeated by every application worker. For an existing PostgreSQL server, set `DATABASE_URL` in `.env` to a `postgresql+psycopg://` connection string and omit Compose. Environment variables override `.env`.
+
+`requirements.lock` pins runtime and development dependencies, including transitive packages. `pyproject.toml` declares compatible ranges. `docker compose stop` preserves local database data.
+
+### Demo data
+
+The seed command prints all IDs and can be repeated without duplicating its records. It creates synthetic data only:
+
+| Resource | IDs | Schedule |
+|---|---|---|
+| Five doctors | `00000000-0000-0000-0000-000000000001` through `00000000-0000-0000-0000-000000000005` | Monday–Friday, 09:00–12:00 and 13:00–17:00 in Nairobi |
+| Three patients | `10000000-0000-0000-0000-000000000001` through `10000000-0000-0000-0000-000000000003` | Existing references for booking requests |
+
+Schedules are validated as a complete set before insertion. The seed process is a single-writer operation; stop application writers before changing seed data. No doctor, patient, or schedule administration endpoints are included. Appointment responses use UTC; availability uses Nairobi offsets and includes the clinic timezone name.
+
+### Example requests
+
+These examples use Monday, 7 January 2030; choose a future working date if that date is no longer at least an hour away. Set the appointment ID from the booking response before cancelling or rescheduling.
+
+```bash
+curl 'http://127.0.0.1:8000/doctors/00000000-0000-0000-0000-000000000001/availability?date=2030-01-07'
+
+curl -X POST http://127.0.0.1:8000/appointments \
+  -H 'Content-Type: application/json' \
+  -d '{"doctor_id":"00000000-0000-0000-0000-000000000001","patient_id":"10000000-0000-0000-0000-000000000001","slot_start":"2030-01-07T09:00:00+03:00"}'
+
+APPOINTMENT_ID='replace-with-booking-response-id'
+curl -X PATCH "http://127.0.0.1:8000/appointments/$APPOINTMENT_ID/reschedule" \
+  -H 'Content-Type: application/json' \
+  -d '{"slot_start":"2030-01-07T10:00:00+03:00"}'
+
+curl 'http://127.0.0.1:8000/patients/10000000-0000-0000-0000-000000000001/appointments'
+
+curl -X PATCH "http://127.0.0.1:8000/appointments/$APPOINTMENT_ID/cancel" \
+  -H 'Content-Type: application/json' \
+  -d '{"reason":"Plans changed"}'
+```
+
+Availability returns `{"doctor_id":"...","date":"2030-01-07","timezone":"Africa/Nairobi","slots":["2030-01-07T09:00:00+03:00", "..."]}`. The patient endpoint returns an array of active future appointments, ordered by start time. Booking, cancellation, and rescheduling return the appointment record, including IDs, `slot_start`, status, cancellation metadata, and creation/update timestamps.
+
+Domain errors use `{"error":{"code":"slot_unavailable","message":"The doctor's slot is already booked"}}`. Malformed input uses `422 invalid_request` with a `details` array containing field locations and messages. Extra request fields, naive timestamps, numeric timestamps, and blank cancellation reasons are rejected. Cancellation reasons containing NUL or unpaired Unicode surrogates also return `422`; valid Unicode text is preserved. Missing resources return `404`; occupied slots and cancelled-state transitions return `409`; scheduling failures return `422`; exhausted deadlock retries return `503` with `Retry-After: 1`. Unknown database failures remain server failures and are never mislabeled as occupied slots or automatically replayed.
+
+### Tests and checks
+
+Use a separate disposable database whose name ends in `_test`. Integration tests migrate that database, truncate all clinic tables before each test, and seed synthetic records. Do not run them against a shared database or concurrently against the same test database.
+
+```bash
+source .venv/bin/activate
+docker compose exec db createdb -U clinic clinic_test
+export TEST_DATABASE_URL='postgresql+psycopg://clinic:clinic@localhost:5432/clinic_test'
+pytest -q
+ruff check clinic migrations tests
+ruff format --check clinic migrations tests
+```
+
+Run `createdb` once; omit it if the test database already exists. Export `TEST_DATABASE_URL` in the shell even if it appears in `.env`. Without it, integration tests skip explicitly. For checks that need no database, run `pytest -q -m 'not integration'`. Supplying an unreachable database produces an error, rather than a passing/skipped integration result.
+
+The suite uses a deterministic clock for cutoff tests, independent PostgreSQL sessions for concurrency, barriers and bounded waits for contention, and controlled deadlock injection for rollback/retry tests. The additional [SQL probes](tests/database-probes.sql) run against a migrated database with `psql -v ON_ERROR_STOP=1 -f tests/database-probes.sql` and roll back their temporary records. They check constraints directly, rather than exercising the HTTP service.
+
+### Verification and remaining work
+
+The [verification record](docs/section-2-verification.md) covers the PostgreSQL integration suite, concurrency checks, invalid-text regressions and dependency scan.
+
+Section 3 deployment and CI/CD, and the Section 4 AI reflection, remain to be completed. No public deployment or automatic deployment pipeline is claimed.
