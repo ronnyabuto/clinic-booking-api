@@ -1,5 +1,13 @@
 # Section 3 verification
 
+## Current verification — 16 October 2026
+
+The repository is now public at [ronnyabuto/clinic-booking-api](https://github.com/ronnyabuto/clinic-booking-api). Reviewers no longer need a collaborator invitation.
+
+The startup follow-up passed **189 tests with zero skips**, Ruff lint and formatting against an isolated PostgreSQL 17 database. The earlier 179-test checkpoint below remains historical evidence.
+
+Render deployment `dep-db8vsilbedkc73f9t1e0` for `79e22ab` built successfully but failed during startup with a port-scan timeout. Captured instance logs stopped at the startup command; they do not establish the original root cause. Startup now reports migration, seed and server stages, and database connection establishment defaults to 10 seconds per host/address instead of waiting indefinitely. Explicit `connect_timeout` URL options are preserved; SQL execution is not bounded by that connection timeout. Cloud recovery verification is pending.
+
 Local verification on 16 October 2026 used Python 3.14.4 and a dedicated PostgreSQL 17 container on port 15432. No shared or cloud database was used for destructive tests.
 
 | Check | Result |

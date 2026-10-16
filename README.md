@@ -147,7 +147,7 @@ Section 3 configuration and the Section 4 AI reflection are included below.
 
 ## Section 3 — Deployment and CI/CD
 
-Repository: [ronnyabuto/clinic-booking-api](https://github.com/ronnyabuto/clinic-booking-api) (private; grant the assessment reviewers access before submission).
+Repository: [ronnyabuto/clinic-booking-api](https://github.com/ronnyabuto/clinic-booking-api) (public; reviewers can read the source and CI history without an invitation).
 
 **Public application URL:** [https://clinic-booking-api-hsqq.onrender.com](https://clinic-booking-api-hsqq.onrender.com). Open [Swagger UI](https://clinic-booking-api-hsqq.onrender.com/docs) to explore the API, or [health](https://clinic-booking-api-hsqq.onrender.com/health) to check readiness. The base path has no UI; use `/docs` in a browser. The public booking lifecycle was verified on 16 October 2026; see the [verification record](docs/section-3-verification.md).
 
@@ -164,6 +164,8 @@ The live resources were provisioned through the authenticated Render API with th
 
 The build installs the pinned dependencies and application. [scripts/start.sh](scripts/start.sh) runs migrations and the repeatable synthetic-data seed before starting Uvicorn on `0.0.0.0:$PORT`. Any migration or seed failure prevents startup. These commands run once per service process, outside the FastAPI lifecycle. Keep this demo at one instance with no concurrent seed or schedule writers. Existing synthetic IDs and appointments survive restarts; seeding does not reset appointments.
 
+Startup logs identify migration, seed and HTTP-server stages. Database connections default to a 10-second timeout per host/address, including migration, seed and request connections. An explicit `connect_timeout` in `DATABASE_URL` overrides the default. This bounds connection establishment, not SQL execution or the entire startup sequence.
+
 Free services do not support Render's separate pre-deploy command, so this demo performs preparation in the start command. For multiple instances or runtime schedule administration, move migration/seed preparation to a separately coordinated release step. Future migrations must remain compatible with the previous application version while Render transitions traffic.
 
 `GET /health` returns `200 {"status":"ok"}` after a successful database query, or `503 {"status":"unavailable"}` on a database error. It does not reveal connection details. Successful migrations and seeding are required before the server starts; health itself checks connectivity, not schema version or seed completeness.
@@ -178,7 +180,7 @@ Render's `autoDeployTrigger: checksPass` links deployment to the CI result on **
 
 Render's build filter includes application code, migrations, startup scripts, `alembic.ini`, `pyproject.toml`, the runtime lockfile, `.python-version` and `render.yaml`. Documentation, tests, CI configuration and development-tool pins alone do not trigger an application deployment. The live service is managed through the Render API rather than Blueprint sync; keep its build filter aligned with `render.yaml` when changing these paths.
 
-The current GitHub plan does not support branch protection for this private repository; `main` has no enforced merge check. If that capability becomes available, require PRs and the **Tests and database checks** status. Render's CI gate controls automatic deployment independently of merge protection.
+`main` has no enforced merge check. The repository is now public; branch protection can require PRs and the **Tests and database checks** status. Render's CI gate controls automatic deployment independently of merge protection.
 
 ### Operational limits
 
