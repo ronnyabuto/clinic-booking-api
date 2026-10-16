@@ -143,7 +143,7 @@ The suite uses a deterministic clock for cutoff tests, independent PostgreSQL se
 
 The [verification record](docs/section-2-verification.md) covers the PostgreSQL integration suite, concurrency checks, invalid-text regressions and dependency scan.
 
-Section 3 configuration is described below. The Section 4 AI reflection remains to be completed.
+Section 3 configuration and the Section 4 AI reflection are included below.
 
 ## Section 3 — Deployment and CI/CD
 
@@ -185,3 +185,35 @@ The current GitHub plan does not support branch protection for this private repo
 This is a public synthetic-data assessment demo. Free Render web services sleep after 15 idle minutes and can take about a minute to wake; free PostgreSQL databases expire after 30 days and have no backups. **The current database expires on 15 November 2026 at 08:50 UTC.** Confirm the database remains valid through the submission/review period, or explicitly upgrade before expiry. The service has no authentication or patient ownership checks and must not store real patient data. Application rollbacks do not reverse database migrations; preserve schema compatibility and arrange backups before using paid hosting for persistent data.
 
 References: [Render Blueprint specification](https://render.com/docs/blueprint-spec), [CI-gated deployments and deploy commands](https://render.com/docs/deploys), [free-plan limits](https://render.com/docs/free).
+
+## Section 4 — AI Reflection
+
+### 1. What I used AI for
+
+I used Codex throughout the assessment, with different responsibilities in each section:
+
+- **System design:** I made the design decisions described in Section 1, then used AI to review the assumptions, challenge edge cases and help document the reasoning and trade-offs.
+- **Implementation:** AI helped implement the API, migrations, seed data and tests. I also used it to review validation, concurrency and failure handling against the assessment requirements.
+- **Deployment and CI/CD:** AI helped configure GitHub Actions and Render, troubleshoot deployment, verify the public booking lifecycle and document the setup.
+- **Reflection:** AI helped inspect the commit history and draft this account. I supplied the distinction between my own design decisions and AI assistance.
+
+### 2. An AI suggestion that improved the work
+
+One useful contribution was strengthening the tests beyond successful requests and duplicate-booking checks. My Section 2 review prompt asked AI to check the implementation for “accuracy, completeness and senior level implementation.”
+
+The subsequent test improvements are recorded in [commit `8a91994`](https://github.com/ronnyabuto/clinic-booking-api/commit/8a919946848ac60fc627ad7b12c7d15be2e75c07). They check that two doctors can independently book the same time, that each doctor's own hours control availability and booking, and that availability agrees with booking at the exact one-hour cutoff and just beyond it. The review also identified tests that imported the application's whitespace constant as their expected input; explicit test values now make those expectations independent of the implementation.
+
+This improved confidence in the documented rules. The PR records 186 passing tests against PostgreSQL and targeted mutation checks for those boundaries; a passing test count alone would not establish that coverage.
+
+### 3. AI output that was incomplete, and how I caught it
+
+The initial AI-assisted deployment setup met the basic CI and automatic-deployment requirements, but it did not distinguish changes that needed an application deployment from documentation or test changes. It also used one dependency lockfile for production and development, so the production install included testing and lint tools.
+
+Reviewing the Render build configuration and dependency files exposed those omissions. [Commit `79e22ab`](https://github.com/ronnyabuto/clinic-booking-api/commit/79e22abf4293ae6fd51c7567761247de8031b1df) adds a runtime-path build filter and separates development dependencies while retaining shared runtime pins. CI still checks every PR and every push to `main`; documentation and test changes alone no longer trigger an application deployment. The follow-up verification included a clean runtime-only install, migrations, seeding, startup and the HTTP booking lifecycle.
+
+The original setup was functional, but operationally incomplete. I needed to review what it installed and when it deployed, rather than treating successful deployment as sufficient evidence.
+
+### 4. Two decisions I made without AI
+
+- **Use a modular monolith.** Five doctors and one booking workflow did not justify independently deployed services. I chose separate modules within one application to keep responsibilities clear and deployment manageable. I trusted that judgment because the assessment's scale and transaction boundaries were explicit.
+- **Make PostgreSQL enforce slot ownership and keep rescheduling atomic.** I chose a partial unique index for active doctor-slot bookings and a transaction for moving an appointment. Availability can become stale between reading and booking, so an application-level check cannot guarantee exclusive ownership. I trusted the database to arbitrate competing writes and preserve the original booking when a move fails. Fixed 30-minute slots on a shared grid make start-time uniqueness sufficient for this design.
