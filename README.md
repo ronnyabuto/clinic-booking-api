@@ -141,7 +141,7 @@ The suite uses a deterministic clock for cutoff tests, independent PostgreSQL se
 
 ### Verification and remaining work
 
-The [verification record](docs/section-2-verification.md) covers the PostgreSQL integration suite, concurrency checks, invalid-text regressions and dependency scan.
+The current suite has **189 passing tests with zero skips** when run against PostgreSQL. The [verification record](docs/section-2-verification.md) identifies the checked revision and covers integration, concurrency, connection-timeout checks, invalid-text regressions and the dependency scan. Earlier checkpoint counts are retained as historical evidence.
 
 Section 3 configuration and the Section 4 AI reflection are included below.
 
@@ -157,7 +157,7 @@ The [Render Blueprint](render.yaml) defines a Python web service and a PostgreSQ
 
 The live resources were provisioned through the authenticated Render API with these settings. They are not attached to a Blueprint sync; the YAML provides a reproducible setup for a new environment. The live database's internal connection string is stored in Render's `DATABASE_URL` environment variable. No database or Render credentials are stored in the repository or GitHub Actions.
 
-1. Connect your GitHub account to Render and allow access to this private repository.
+1. Connect your GitHub account to Render and allow access to this repository so Render can observe CI results.
 2. For a new environment, create a Blueprint from this repository, select `main`, and apply `render.yaml`. Review both free plans before provisioning. If the workspace already has its single free database, choose another workspace or explicitly select a paid plan. Do not provision a duplicate of the existing live service.
 3. Confirm the service deploys from `main` with **After CI Checks Pass**, and that the health-check path is `/health`.
 4. Wait for PostgreSQL to become available and the web deployment to become live. If the web service starts before the database's private hostname is ready, the migration fails safely; redeploy after database provisioning completes. Verify availability, booking, rescheduling, cancellation and rebooking using the synthetic IDs documented earlier.

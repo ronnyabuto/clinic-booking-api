@@ -4,9 +4,17 @@
 
 The repository is now public at [ronnyabuto/clinic-booking-api](https://github.com/ronnyabuto/clinic-booking-api). Reviewers no longer need a collaborator invitation.
 
-The startup follow-up passed **189 tests with zero skips**, Ruff lint and formatting against an isolated PostgreSQL 17 database. The earlier 179-test checkpoint below remains historical evidence.
+The startup follow-up, merged as `26f5ccc` in [PR #6](https://github.com/ronnyabuto/clinic-booking-api/pull/6), passed **189 tests with zero skips**, SQL constraint probes, Ruff lint/format and dependency consistency against an isolated PostgreSQL 17 database. Both [PR CI](https://github.com/ronnyabuto/clinic-booking-api/actions/runs/38891973844) and [main CI](https://github.com/ronnyabuto/clinic-booking-api/actions/runs/38892107294) passed. The earlier 179-test checkpoint below remains historical evidence.
 
-Render deployment `dep-db8vsilbedkc73f9t1e0` for `79e22ab` built successfully but failed during startup with a port-scan timeout. Captured instance logs stopped at the startup command; they do not establish the original root cause. Startup now reports migration, seed and server stages, and database connection establishment defaults to 10 seconds per host/address instead of waiting indefinitely. Explicit `connect_timeout` URL options are preserved; SQL execution is not bounded by that connection timeout. Cloud recovery verification is pending.
+Render deployment `dep-db8vsilbedkc73f9t1e0` for `79e22ab` built successfully but failed during startup with a port-scan timeout. Captured instance logs stopped at the startup command; they do not establish the original root cause. A manual redeployment of unchanged application code, `dep-db90arnf3r2c73flf85g` for `3fe4e82`, became live at 11:08:48 UTC. The failure did not recur in that attempt, so the evidence supports recovery without proving a deterministic application defect.
+
+Startup now reports migration, seed and server stages, and database connection establishment defaults to 10 seconds per host/address instead of waiting indefinitely. Explicit `connect_timeout` URL options are preserved; SQL execution is not bounded by that connection timeout. This hardens a previously unbounded failure path rather than claiming to establish the original failure's cause.
+
+After main CI passed, Render automatically deployed `26f5ccc` as `dep-db90d5p7lnhs73am8il0`, with trigger `new_commit` and status `live` at **11:13:40 UTC on 16 October 2026**. Its logs show migration preparation at 11:13:05, seeding at 11:13:23, server launch on port 10000 at 11:13:28, and application startup complete at 11:13:34.
+
+The public HTTP lifecycle passed on the recovered service: availability, booking, occupied-slot conflict, rescheduling and old-slot release, blank-reason rejection, patient upcoming appointments, cancellation, repeated-cancellation conflict and rebooking. The retained synthetic appointment survived the subsequent automatic deployment of `26f5ccc`; a public read found it, cancellation returned 200, and availability showed the released slot. No active verification booking was left behind.
+
+Scratch evidence: `/tmp/clinic-startup-fixed-deploys.json`, `/tmp/clinic-startup-fixed-stages.log` and `/tmp/clinic-render-smoke.json`. Render deployment history and the linked GitHub runs provide the remote evidence. Documentation-only follow-ups do not trigger another deployment because the runtime build filter is unchanged.
 
 Local verification on 16 October 2026 used Python 3.14.4 and a dedicated PostgreSQL 17 container on port 15432. No shared or cloud database was used for destructive tests.
 
