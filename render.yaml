@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: clinic-booking-api
+    runtime: python
+    plan: free
+    region: frankfurt
+    branch: main
+    autoDeployTrigger: checksPass
+    buildCommand: python -m pip install -r requirements.lock && python -m pip install --no-deps .
+    startCommand: sh scripts/start.sh
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: clinic-booking-db
+          property: connectionString
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+databases:
+  - name: clinic-booking-db
+    plan: free
+    region: frankfurt
+    postgresMajorVersion: "17"
+    databaseName: clinic
+    user: clinic
+    ipAllowList: []

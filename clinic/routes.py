@@ -3,6 +3,9 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from clinic.schemas import (
     AppointmentResponse,
@@ -23,6 +26,16 @@ def booking_service(request: Request) -> BookingService:
 
 
 Service = Annotated[BookingService, Depends(booking_service)]
+
+
+@router.get("/health", include_in_schema=False)
+def health(service: Service):
+    try:
+        with service.sessions() as session:
+            session.execute(text("SELECT 1"))
+    except SQLAlchemyError:
+        return JSONResponse(status_code=503, content={"status": "unavailable"})
+    return {"status": "ok"}
 
 
 @router.post(
