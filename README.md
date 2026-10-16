@@ -149,16 +149,18 @@ Section 3 configuration is described below. The Section 4 AI reflection remains 
 
 Repository: [ronnyabuto/clinic-booking-api](https://github.com/ronnyabuto/clinic-booking-api) (private; grant the assessment reviewers access before submission).
 
-**Public application URL: pending Render provisioning.** No live deployment has been verified yet. Use the service URL assigned by Render after the first successful deployment; append `/docs` for the interactive API and `/health` for readiness.
+**Public application URL:** [https://clinic-booking-api-hsqq.onrender.com](https://clinic-booking-api-hsqq.onrender.com). Open [Swagger UI](https://clinic-booking-api-hsqq.onrender.com/docs) to explore the API, or [health](https://clinic-booking-api-hsqq.onrender.com/health) to check readiness. The base path has no UI; use `/docs` in a browser. The public booking lifecycle was verified on 16 October 2026; see the [verification record](docs/section-3-verification.md).
 
 ### Render setup
 
 The [Render Blueprint](render.yaml) defines a Python web service and a PostgreSQL 17 database in Frankfurt. Both use the free plan. Python is pinned in [.python-version](.python-version), shared by Render and CI. Database access is private to Render's network; the application normalizes Render's `postgresql://` connection string to the existing `postgresql+psycopg://` driver without changing credentials or connection options.
 
+The live resources were provisioned through the authenticated Render API with these settings. They are not attached to a Blueprint sync; the YAML provides a reproducible setup for a new environment. The live database's internal connection string is stored in Render's `DATABASE_URL` environment variable. No database or Render credentials are stored in the repository or GitHub Actions.
+
 1. Connect your GitHub account to Render and allow access to this private repository.
-2. In Render, create a Blueprint from this repository, select `main`, and apply `render.yaml` after it is merged. Review both free plans before provisioning. If the workspace already has its single free database, choose another workspace or explicitly select a paid plan.
+2. For a new environment, create a Blueprint from this repository, select `main`, and apply `render.yaml`. Review both free plans before provisioning. If the workspace already has its single free database, choose another workspace or explicitly select a paid plan. Do not provision a duplicate of the existing live service.
 3. Confirm the service deploys from `main` with **After CI Checks Pass**, and that the health-check path is `/health`.
-4. Wait for the deployment to become live, record its assigned public URL above, and verify availability, booking, rescheduling, cancellation and rebooking using the synthetic IDs documented earlier.
+4. Wait for PostgreSQL to become available and the web deployment to become live. If the web service starts before the database's private hostname is ready, the migration fails safely; redeploy after database provisioning completes. Verify availability, booking, rescheduling, cancellation and rebooking using the synthetic IDs documented earlier.
 
 The build installs the pinned dependencies and application. [scripts/start.sh](scripts/start.sh) runs migrations and the repeatable synthetic-data seed before starting Uvicorn on `0.0.0.0:$PORT`. Any migration or seed failure prevents startup. These commands run once per service process, outside the FastAPI lifecycle. Keep this demo at one instance with no concurrent seed or schedule writers. Existing synthetic IDs and appointments survive restarts; seeding does not reset appointments.
 
@@ -174,6 +176,6 @@ Render's `autoDeployTrigger: checksPass` links deployment to the CI result on **
 
 ### Operational limits
 
-This is a public synthetic-data assessment demo. Free Render web services sleep after 15 idle minutes and can take about a minute to wake; free PostgreSQL databases expire after 30 days and have no backups. Confirm the database remains valid through the submission/review period, or explicitly upgrade before expiry. The service has no authentication or patient ownership checks and must not store real patient data. Application rollbacks do not reverse database migrations; preserve schema compatibility and arrange backups before using paid hosting for persistent data.
+This is a public synthetic-data assessment demo. Free Render web services sleep after 15 idle minutes and can take about a minute to wake; free PostgreSQL databases expire after 30 days and have no backups. **The current database expires on 15 November 2026 at 08:50 UTC.** Confirm the database remains valid through the submission/review period, or explicitly upgrade before expiry. The service has no authentication or patient ownership checks and must not store real patient data. Application rollbacks do not reverse database migrations; preserve schema compatibility and arrange backups before using paid hosting for persistent data.
 
 References: [Render Blueprint specification](https://render.com/docs/blueprint-spec), [CI-gated deployments and deploy commands](https://render.com/docs/deploys), [free-plan limits](https://render.com/docs/free).
