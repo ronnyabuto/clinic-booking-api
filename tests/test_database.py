@@ -6,11 +6,14 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from clinic.models import Appointment, Doctor, DoctorSchedule
-from clinic.policies import WHITE_SPACE
 from clinic.seed import DOCTOR_IDS, PATIENT_IDS, demo_schedules, seed_demo
 
 pytestmark = pytest.mark.integration
 START = datetime(2030, 1, 7, 6, tzinfo=UTC)
+WHITESPACE = (
+    "\t\n\v\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005"
+    "\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
+)
 
 
 @pytest.mark.parametrize(
@@ -22,13 +25,12 @@ START = datetime(2030, 1, 7, 6, tzinfo=UTC)
         {"status": "CANCELLED", "cancel_reason": "Reason"},
         {"status": "CANCELLED", "cancel_reason": None, "cancelled_at": START},
         {"status": "CANCELLED", "cancel_reason": "", "cancelled_at": START},
-        {"status": "CANCELLED", "cancel_reason": WHITE_SPACE, "cancelled_at": START},
+        {"status": "CANCELLED", "cancel_reason": WHITESPACE, "cancelled_at": START},
         {"status": "BOOKED", "cancel_reason": "Reason"},
         {"status": "BOOKED", "cancelled_at": START},
     ]
     + [
-        {"status": "CANCELLED", "cancel_reason": char, "cancelled_at": START}
-        for char in WHITE_SPACE
+        {"status": "CANCELLED", "cancel_reason": char, "cancelled_at": START} for char in WHITESPACE
     ],
 )
 def test_database_rejects_invalid_cancellation_state(sessions, fields):

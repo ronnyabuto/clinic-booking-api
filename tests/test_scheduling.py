@@ -6,7 +6,7 @@ from pydantic import ValidationError
 
 from clinic.errors import BookingError
 from clinic.models import DoctorSchedule
-from clinic.policies import WHITE_SPACE, normalize_reason
+from clinic.policies import normalize_reason
 from clinic.scheduling import (
     day_bounds,
     scheduled_slots,
@@ -20,6 +20,10 @@ DAY = date(2030, 1, 7)
 NOW = datetime(2030, 1, 7, 5, tzinfo=UTC)
 DOCTOR = DOCTOR_IDS[0]
 WINDOWS = [window for window in demo_schedules() if window.doctor_id == DOCTOR]
+WHITESPACE = (
+    "\t\n\v\f\r \u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005"
+    "\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
+)
 
 
 def window(start=time(9), end=time(12), weekday=0):
@@ -69,14 +73,15 @@ def test_timezone_conversion_uses_local_weekday_and_grid():
     assert validate_destination(start, WINDOWS, NOW).hour == 6
 
 
-def test_availability_is_sorted_unique_and_respects_break():
-    slots = sorted(scheduled_slots(DAY, WINDOWS))
-    assert len(slots) == 14
-    assert len(set(slots)) == 14
-    assert slots[0] == datetime(2030, 1, 7, 6, tzinfo=UTC)
-    assert slots[-1] == datetime(2030, 1, 7, 13, 30, tzinfo=UTC)
+def test_scheduled_slots_follow_working_windows_and_exclude_breaks():
+    expected = {
+        datetime.fromisoformat(f"2030-01-07T{hour:02}:{minute:02}:00+03:00")
+        for hour in (9, 10, 11, 13, 14, 15, 16)
+        for minute in (0, 30)
+    }
+    assert scheduled_slots(DAY, WINDOWS) == expected
     assert not scheduled_slots(date(2030, 1, 6), WINDOWS)
-    assert scheduled_slots(DAY, WINDOWS + WINDOWS) == set(slots)
+    assert scheduled_slots(DAY, WINDOWS + WINDOWS) == expected
 
 
 def test_local_date_bounds_are_half_open_utc():
@@ -141,7 +146,7 @@ def test_adjacent_windows_and_complete_demo_set_accepted():
     assert len(scheduled_slots(DAY, adjacent)) == 8
 
 
-@pytest.mark.parametrize("reason", ["", WHITE_SPACE, *WHITE_SPACE])
+@pytest.mark.parametrize("reason", ["", WHITESPACE, *WHITESPACE])
 def test_explicit_whitespace_rejected(reason):
     with pytest.raises(ValueError):
         normalize_reason(reason)
@@ -150,8 +155,7 @@ def test_explicit_whitespace_rejected(reason):
 
 
 def test_reason_normalization_is_pinned():
-    assert len(WHITE_SPACE) == 25
-    assert normalize_reason(WHITE_SPACE + "Changed plans" + WHITE_SPACE) == "Changed plans"
+    assert normalize_reason(WHITESPACE + "Changed plans" + WHITESPACE) == "Changed plans"
     assert normalize_reason("\u001c") == "\u001c"
 
 

@@ -16,7 +16,7 @@ def test_hosted_database_url_preserves_credentials_and_connection_options(scheme
     assert settings.database_url == f"postgresql+psycopg://{suffix}"
 
 
-def test_health_reports_database_failure_and_recovery_without_leaking_details():
+def test_health_returns_503_on_query_failure_then_200_on_success():
     sessions = MagicMock()
     execute = sessions.return_value.__enter__.return_value.execute
     execute.side_effect = [
