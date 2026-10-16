@@ -1,3 +1,7 @@
+import socket
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -5,8 +9,43 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
 
 from clinic.config import Settings
+from clinic.database import make_engine
 from clinic.main import create_app
 from clinic.service import BookingService
+
+
+@pytest.mark.parametrize("query,expected", [("", 10), ("?connect_timeout=3&sslmode=require", 3)])
+def test_database_connections_have_a_timeout_and_preserve_explicit_options(query, expected):
+    engine = make_engine(f"postgresql+psycopg://clinic:clinic@localhost/clinic{query}")
+    try:
+        _, parameters = engine.dialect.create_connect_args(engine.url)
+        assert int(parameters["connect_timeout"]) == expected
+        if query:
+            assert parameters["sslmode"] == "require"
+    finally:
+        engine.dispose()
+
+
+def test_unresponsive_database_connection_times_out():
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from clinic.database import make_engine; "
+                "import sys; make_engine(sys.argv[1]).connect()",
+                f"postgresql+psycopg://clinic:clinic@127.0.0.1:{port}/clinic_test",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    assert result.returncode != 0
+    assert "timeout expired" in result.stderr
 
 
 @pytest.mark.parametrize("scheme", ["postgres", "postgresql", "postgresql+psycopg"])

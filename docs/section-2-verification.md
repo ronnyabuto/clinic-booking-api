@@ -1,5 +1,11 @@
 # Section 2 verification
 
+## Current verification — 16 October 2026
+
+The deployment-startup follow-up passed **189 tests with zero skips** against an isolated PostgreSQL 17 database, including a real TCP peer that accepts a connection but never completes the PostgreSQL handshake. Connection establishment now defaults to 10 seconds; an explicit URL timeout is preserved. Ruff lint and formatting passed. The JUnit report is `/tmp/clinic-startup-fix-tests.xml`; GitHub CI retains its own report after the follow-up is pushed.
+
+The table below records the earlier Section 2 checkpoint, rather than the current suite size.
+
 Verified on 16 October 2026 using Python 3.14.4 and PostgreSQL 17.9, with the versions pinned in `requirements.lock`.
 
 | Check | Result |
