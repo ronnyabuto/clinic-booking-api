@@ -1,14 +1,29 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException
 
 from clinic.config import Settings
 from clinic.database import make_engine, make_session_factory
 from clinic.errors import BookingError
 from clinic.routes import router
 from clinic.service import BookingService
+
+
+def _invalid_json_response(details: list[dict]) -> JSONResponse:
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error": {
+                "code": "invalid_json",
+                "message": "Request body is not valid JSON",
+                "details": details,
+            }
+        },
+    )
 
 
 def create_app(service: BookingService | None = None) -> FastAPI:
@@ -37,6 +52,20 @@ def create_app(service: BookingService | None = None) -> FastAPI:
             headers=headers,
         )
 
+    @app.exception_handler(400)
+    async def bad_request(request: Request, error: HTTPException):
+        if isinstance(error.__cause__, UnicodeDecodeError):
+            return _invalid_json_response(
+                [
+                    {
+                        "location": ["body"],
+                        "message": "JSON body could not be decoded",
+                        "type": "json_invalid",
+                    }
+                ]
+            )
+        return await http_exception_handler(request, error)
+
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, error: RequestValidationError):
         details = [
@@ -44,12 +73,16 @@ def create_app(service: BookingService | None = None) -> FastAPI:
             for item in error.errors()
         ]
         if any(item["type"] == "json_invalid" for item in details):
-            status, code, message = 400, "invalid_json", "Request body is not valid JSON"
-        else:
-            status, code, message = 422, "invalid_request", "Request validation failed"
+            return _invalid_json_response(details)
         return JSONResponse(
-            status_code=status,
-            content={"error": {"code": code, "message": message, "details": details}},
+            status_code=422,
+            content={
+                "error": {
+                    "code": "invalid_request",
+                    "message": "Request validation failed",
+                    "details": details,
+                }
+            },
         )
 
     return app
