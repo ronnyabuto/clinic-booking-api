@@ -21,6 +21,17 @@ A modular monolith keeps request validation, booking transactions, scheduling ru
 | `clinic/models.py`, `database.py`, `config.py` | Persistence models, sessions and settings |
 | `clinic/seed.py`, `migrations/` | Validated demo data and versioned schema |
 
+### Scaling path
+
+The initial design is synchronous and uses one database connection per request, which is appropriate for a five-doctor clinic. A production scale-out path would proceed as follows:
+
+| Step | Mechanism |
+|---|---|
+| Connection pooling | Add PgBouncer in front of PostgreSQL; configure `pool_size` and `max_overflow` on the SQLAlchemy engine |
+| Read scale-out | Route `availability` and `upcoming` queries to a PostgreSQL read replica; `SELECT … FOR UPDATE` write paths remain on the primary |
+| Async workers | Replace synchronous SQLAlchemy + Uvicorn with asyncpg + asyncio; add Uvicorn `--workers N` behind a process supervisor |
+| Multi-region | The partial unique index and `FOR UPDATE` lock are PostgreSQL-native and compatible with Citus or logical-replication read replicas |
+
 ### Models
 
 | Model | Fields and relationships |
@@ -170,7 +181,11 @@ Railway watches **`main`** with **Wait for CI** enabled. When a pull request wit
 
 ### 2. An AI suggestion that improved the work
 
-I asked AI to review the Section 2 implementation and tests for accuracy and completeness. The resulting test improvements are recorded in [commit `8a91994`](https://github.com/ronnyabuto/clinic-booking-api/commit/8a919946848ac60fc627ad7b12c7d15be2e75c07).
+I asked AI to review the Section 2 implementation and tests for accuracy and completeness using the prompt:
+
+> "Review the Section 2 implementation and test suite for accuracy and completeness against the assessment requirements. Flag any tests that depend on implementation constants as their expected values, any missing cross-doctor booking isolation checks, and any gaps in the notice-cutoff agreement between availability and booking."
+
+The resulting test improvements are recorded in [commit `8a91994`](https://github.com/ronnyabuto/clinic-booking-api/commit/8a919946848ac60fc627ad7b12c7d15be2e75c07).
 
 They check that two doctors can independently book the same time, that each doctor's own hours control availability and booking, and that availability agrees with booking at the exact one-hour cutoff and just beyond it. The review also identified tests that imported the application's whitespace constant as their expected input; explicit test values now make those expectations independent of the implementation.
 
