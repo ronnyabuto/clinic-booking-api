@@ -308,13 +308,18 @@ def test_malformed_booking_input_returns_422(client, changes):
     ],
 )
 def test_malformed_json_returns_400_while_missing_fields_return_422(client, method, path):
-    response = client.request(
-        method, path, content="{", headers={"Content-Type": "application/json"}
-    )
-    assert response.status_code == 400
-    error = response.json()["error"]
-    assert error["code"] == "invalid_json"
-    assert error["details"][0]["type"] == "json_invalid"
+    for body, location in [(b"{", ["body", 1]), (b'{"value":"\xe9"}', ["body"])]:
+        response = client.request(
+            method, path, content=body, headers={"Content-Type": "application/json"}
+        )
+        assert response.status_code == 400
+        error = response.json()["error"]
+        assert error["code"] == "invalid_json"
+        assert error["message"] == "Request body is not valid JSON"
+        detail = error["details"][0]
+        assert detail["type"] == "json_invalid"
+        assert detail["location"] == location
+        assert detail["message"]
 
     response = client.request(method, path, json={})
     assert response.status_code == 422

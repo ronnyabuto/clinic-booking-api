@@ -2,8 +2,8 @@
 
 FastAPI and PostgreSQL API for a clinic with five doctors. Patients can view available 30-minute slots, book, cancel with a reason, and reschedule.
 
-- **Live API:** [clinic-api-production-5b84ef6f.up.railway.app](https://clinic-api-production-5b84ef6f.up.railway.app)
-- **Interactive docs:** [Swagger UI](https://clinic-api-production-5b84ef6f.up.railway.app/docs)
+- [Try the live API in Swagger UI](https://clinic-api-production-5b84ef6f.up.railway.app/docs)
+- **API base URL** [clinic-api-production-5b84ef6f.up.railway.app](https://clinic-api-production-5b84ef6f.up.railway.app)
 - **Health:** [/health](https://clinic-api-production-5b84ef6f.up.railway.app/health)
 - **Repository:** [ronnyabuto/clinic-booking-api](https://github.com/ronnyabuto/clinic-booking-api)
 
@@ -23,14 +23,14 @@ A modular monolith keeps request validation, booking transactions, scheduling ru
 
 ### Scaling path
 
-The initial design is synchronous and uses one database connection per request, which is appropriate for a five-doctor clinic. A production scale-out path would proceed as follows:
+The five-doctor deployment uses synchronous request handlers, SQLAlchemy's connection pool, and one PostgreSQL primary. Measure request latency, worker saturation, and database load before adding capacity.
 
 | Step | Mechanism |
 |---|---|
-| Connection pooling | Add PgBouncer in front of PostgreSQL; configure `pool_size` and `max_overflow` on the SQLAlchemy engine |
-| Read scale-out | Route `availability` and `upcoming` queries to a PostgreSQL read replica; `SELECT … FOR UPDATE` write paths remain on the primary |
-| Async workers | Replace synchronous SQLAlchemy + Uvicorn with asyncpg + asyncio; add Uvicorn `--workers N` behind a process supervisor |
-| Multi-region | The partial unique index and `FOR UPDATE` lock are PostgreSQL-native and compatible with Citus or logical-replication read replicas |
+| Connection pooling | Budget `pool_size` and `max_overflow` across workers and replicas. Consider PgBouncer if total connections approach PostgreSQL's limit. |
+| Application capacity | Add Uvicorn workers or app replicas if workers saturate and the database has headroom. Consider async database access if profiling shows that workers spend most of their time waiting on I/O. |
+| Read replicas | Keep availability and upcoming appointments on the primary so clients see committed booking changes immediately. Use replicas for reads that can tolerate replication lag. [PostgreSQL docs](https://www.postgresql.org/docs/17/hot-standby.html) |
+| Regional growth | Keep booking writes on one primary. Sharding appointments by `doctor_id` with Citus would require adding `doctor_id` to the primary key and reviewing foreign keys and routes that look up appointments by ID. [Citus docs](https://docs.citusdata.com/en/v13.0/develop/reference_ddl.html#adding-removing-constraints) |
 
 ### Models
 
@@ -136,7 +136,7 @@ curl -X PATCH "http://127.0.0.1:8000/appointments/$APPOINTMENT_ID/cancel" \
 
 Availability returns `{"doctor_id":"...","date":"2030-01-07","timezone":"Africa/Nairobi","slots":["2030-01-07T09:00:00+03:00", "..."]}`. The patient endpoint returns an array of active future appointments, ordered by start time. Booking, cancellation, and rescheduling return the appointment record, including IDs, `slot_start`, status, cancellation metadata, and creation/update timestamps.
 
-Domain errors use `{"error":{"code":"slot_unavailable","message":"The doctor's slot is already booked"}}`. Malformed JSON uses `400 invalid_json`. Invalid request fields use `422 invalid_request`. Both include a `details` array with field locations and messages. Extra request fields, naive timestamps, numeric timestamps, and blank cancellation reasons are rejected. Missing resources return `404`; occupied slots and cancelled-state transitions return `409`; scheduling failures, including dates outside the supported calendar range, return `422`; exhausted deadlock retries return `503` with `Retry-After: 1`. Unknown database failures remain server failures and are never mislabeled as occupied slots or automatically replayed.
+Domain errors use `{"error":{"code":"slot_unavailable","message":"The doctor's slot is already booked"}}`. Invalid JSON syntax or text encoding returns `400 invalid_json`. Invalid request fields return `422 invalid_request`. Both include a `details` array with locations and messages. Extra request fields, naive timestamps, numeric timestamps, and blank cancellation reasons are rejected. Missing resources return `404`; occupied slots and cancelled-state transitions return `409`; scheduling failures, including dates outside the supported calendar range, return `422`; exhausted deadlock retries return `503` with `Retry-After: 1`. Unknown database failures remain server failures and are never mislabeled as occupied slots or automatically replayed.
 
 ### Tests and checks
 
