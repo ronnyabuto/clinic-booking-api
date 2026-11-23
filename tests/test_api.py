@@ -195,6 +195,24 @@ def test_cancelled_state_takes_precedence_over_destination_rules(client):
     assert move.json()["error"]["code"] == "appointment_cancelled"
 
 
+def test_availability_and_writes_agree_on_unsupported_calendar_day(client):
+    day = "9999-12-31"
+    destination = f"{day}T09:00:00+03:00"
+    original = book(client).json()
+    responses = (
+        availability(client, day),
+        book(client, destination),
+        client.patch(
+            f"/appointments/{original['id']}/reschedule", json={"slot_start": destination}
+        ),
+    )
+    for response in responses:
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "invalid_date"
+    assert START not in availability(client).json()["slots"]
+    assert client.get(f"/patients/{PATIENT}/appointments").json() == [original]
+
+
 def test_same_slot_equivalent_offset_retains_timestamps_and_validates_notice(client, service):
     appointment = book(client).json()
     path = f"/appointments/{appointment['id']}/reschedule"
@@ -277,6 +295,28 @@ def test_malformed_booking_input_returns_422(client, changes):
         if "slot_start" not in changes
         else book(client, changes["slot_start"])
     )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_request"
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "/appointments"),
+        ("PATCH", f"/appointments/{DOCTOR}/cancel"),
+        ("PATCH", f"/appointments/{DOCTOR}/reschedule"),
+    ],
+)
+def test_malformed_json_returns_400_while_missing_fields_return_422(client, method, path):
+    response = client.request(
+        method, path, content="{", headers={"Content-Type": "application/json"}
+    )
+    assert response.status_code == 400
+    error = response.json()["error"]
+    assert error["code"] == "invalid_json"
+    assert error["details"][0]["type"] == "json_invalid"
+
+    response = client.request(method, path, json={})
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "invalid_request"
 

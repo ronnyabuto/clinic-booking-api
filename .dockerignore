@@ -1,0 +1,12 @@
+*
+!Dockerfile
+!alembic.ini
+!clinic/
+!clinic/**
+!migrations/
+!migrations/**
+!pyproject.toml
+!requirements.lock
+!scripts/
+!scripts/prepare-db.sh
+**/__pycache__/

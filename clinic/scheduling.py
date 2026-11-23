@@ -71,7 +71,9 @@ def validate_destination(start: datetime, windows: list[ScheduleWindow], now: da
         raise BookingError(422, "invalid_slot_grid", "Slots start at :00 or :30 with zero seconds")
     if start < now + MIN_NOTICE:
         raise BookingError(422, "insufficient_notice", "Slot must start at least one hour from now")
-    if start not in scheduled_slots(local.date(), windows):
+    local_day = local.date()
+    day_bounds(local_day)
+    if start not in scheduled_slots(local_day, windows):
         raise BookingError(
             422, "outside_working_hours", "Slot must fit within a doctor's working window"
         )

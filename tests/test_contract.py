@@ -20,6 +20,14 @@ def test_openapi_is_available_without_database_configuration(monkeypatch):
     assert schema["paths"]["/appointments/{id}/reschedule"]["patch"]
     assert schema["paths"]["/doctors/{id}/availability"]["get"]
     assert schema["paths"]["/patients/{id}/appointments"]["get"]
+    for path, method in (
+        ("/appointments", "post"),
+        ("/appointments/{id}/cancel", "patch"),
+        ("/appointments/{id}/reschedule", "patch"),
+    ):
+        assert schema["paths"][path][method]["responses"]["400"]["content"]["application/json"][
+            "schema"
+        ] == {"$ref": "#/components/schemas/ErrorResponse"}
     assert schema["paths"]["/appointments"]["post"]["responses"]["422"]["content"][
         "application/json"
     ]["schema"] == {"$ref": "#/components/schemas/ErrorResponse"}
