@@ -2,9 +2,9 @@
 
 FastAPI and PostgreSQL API for a clinic with five doctors. Patients can view available 30-minute slots, book, cancel with a reason, and reschedule.
 
-- **Live API:** [clinic-booking-api-hsqq.onrender.com](https://clinic-booking-api-hsqq.onrender.com)
-- **Interactive docs:** [Swagger UI](https://clinic-booking-api-hsqq.onrender.com/docs)
-- **Health:** [/health](https://clinic-booking-api-hsqq.onrender.com/health)
+- **Live API:** [clinic-api-production-5b84ef6f.up.railway.app](https://clinic-api-production-5b84ef6f.up.railway.app)
+- **Interactive docs:** [Swagger UI](https://clinic-api-production-5b84ef6f.up.railway.app/docs)
+- **Health:** [/health](https://clinic-api-production-5b84ef6f.up.railway.app/health)
 - **Repository:** [ronnyabuto/clinic-booking-api](https://github.com/ronnyabuto/clinic-booking-api)
 
 ## Section 1 — System Design
@@ -87,7 +87,7 @@ uvicorn clinic.main:app --host 127.0.0.1 --port 8000
 
 Open [Swagger UI](http://127.0.0.1:8000/docs), [ReDoc](http://127.0.0.1:8000/redoc), or [OpenAPI JSON](http://127.0.0.1:8000/openapi.json). Database migrations and seeding are explicit commands, rather than actions repeated by every application worker. For an existing PostgreSQL server, set `DATABASE_URL` in `.env` to a `postgresql+psycopg://` connection string and omit Compose. Environment variables override `.env`.
 
-`requirements.lock` pins runtime dependencies, including transitive packages. `requirements-dev.lock` includes that file and adds the test and lint tools; use it for local development and CI. Render installs only `requirements.lock`. Update shared runtime pins in that file so both environments use the same versions. `pyproject.toml` declares compatible ranges. `docker compose stop` preserves local database data.
+`requirements.lock` pins runtime dependencies, including transitive packages. `requirements-dev.lock` includes that file and adds the test and lint tools; use it for local development and CI. The Railway image installs only `requirements.lock`. Update shared runtime pins in that file so both environments use the same versions. `pyproject.toml` declares compatible ranges. `docker compose stop` preserves local database data.
 
 ### Demo data
 
@@ -125,7 +125,7 @@ curl -X PATCH "http://127.0.0.1:8000/appointments/$APPOINTMENT_ID/cancel" \
 
 Availability returns `{"doctor_id":"...","date":"2030-01-07","timezone":"Africa/Nairobi","slots":["2030-01-07T09:00:00+03:00", "..."]}`. The patient endpoint returns an array of active future appointments, ordered by start time. Booking, cancellation, and rescheduling return the appointment record, including IDs, `slot_start`, status, cancellation metadata, and creation/update timestamps.
 
-Domain errors use `{"error":{"code":"slot_unavailable","message":"The doctor's slot is already booked"}}`. Malformed input uses `422 invalid_request` with a `details` array containing field locations and messages. Extra request fields, naive timestamps, numeric timestamps, and blank cancellation reasons are rejected. Missing resources return `404`; occupied slots and cancelled-state transitions return `409`; scheduling failures return `422`; exhausted deadlock retries return `503` with `Retry-After: 1`. Unknown database failures remain server failures and are never mislabeled as occupied slots or automatically replayed.
+Domain errors use `{"error":{"code":"slot_unavailable","message":"The doctor's slot is already booked"}}`. Malformed JSON uses `400 invalid_json`. Invalid request fields use `422 invalid_request`. Both include a `details` array with field locations and messages. Extra request fields, naive timestamps, numeric timestamps, and blank cancellation reasons are rejected. Missing resources return `404`; occupied slots and cancelled-state transitions return `409`; scheduling failures, including dates outside the supported calendar range, return `422`; exhausted deadlock retries return `503` with `Retry-After: 1`. Unknown database failures remain server failures and are never mislabeled as occupied slots or automatically replayed.
 
 ### Tests and checks
 
@@ -146,21 +146,19 @@ The suite uses a deterministic clock for cutoff tests, independent PostgreSQL se
 
 ## Section 3 — Deployment and CI/CD
 
-The API is hosted on Render at [clinic-booking-api-hsqq.onrender.com](https://clinic-booking-api-hsqq.onrender.com). Use [/docs](https://clinic-booking-api-hsqq.onrender.com/docs) to explore the endpoints. `GET /health` checks database connectivity and returns `200 {"status":"ok"}`, or `503` if the database is unavailable.
+The API runs on [Railway](https://clinic-api-production-5b84ef6f.up.railway.app). Use [Swagger UI](https://clinic-api-production-5b84ef6f.up.railway.app/docs) to try the endpoints and [/health](https://clinic-api-production-5b84ef6f.up.railway.app/health) to check database connectivity. Health returns `200 {"status":"ok"}` when the database responds or `503` when it is unavailable.
 
 ### Hosting
 
-[render.yaml](render.yaml) describes a Python web service and a private PostgreSQL 17 database in Frankfurt. The live resources are configured separately from Blueprint sync; the file provides a reproducible setup for a new environment. Python is pinned in [.python-version](.python-version), and production installs dependencies from `requirements.lock`.
+The [Dockerfile](Dockerfile) pins Python 3.14.4, installs the runtime lockfile, and starts Uvicorn on `PORT`. The Railway `clinic-api` service listens on port 8000 with Serverless disabled. It uses `DATABASE_URL` to reach PostgreSQL 17 on Railway's private network. A persistent volume at `/var/lib/postgresql/data` holds the database.
 
-[scripts/start.sh](scripts/start.sh) runs migrations and seeds synthetic records before starting Uvicorn. A preparation failure prevents startup. Seeding preserves existing appointments. This demo runs as one instance; multiple instances would require a coordinated migration and seed step.
-
-The service uses Render's free plan, so it can sleep when idle and take time to respond to the first request. The demo database expires on **15 November 2026**; renew or replace it before then if reviewers still need access. Only synthetic patient data belongs in this unauthenticated demo.
+Railway runs `sh scripts/prepare-db.sh` as the [pre-deploy command](scripts/prepare-db.sh). This applies migrations and seeds the synthetic clinic records without replacing existing appointments. A preparation failure stops the deployment. Railway checks `/health` before routing traffic to the new instance. Use only synthetic data in this unauthenticated demo.
 
 ### Pipeline and deployment branch
 
-[.github/workflows/ci.yml](.github/workflows/ci.yml) runs on every pull request and every push to **`main`**. It provisions an isolated PostgreSQL 17 database, installs development dependencies, checks dependency consistency and Ruff lint/format, applies migrations, runs the unit, integration and concurrency tests, and checks SQL constraints directly. Test results are uploaded as a CI artifact.
+[GitHub Actions](.github/workflows/ci.yml) runs on every pull request and every push to **`main`**. It provisions isolated PostgreSQL 17, checks dependency consistency and Ruff lint/format, applies migrations, runs the unit, integration and concurrency tests, and checks SQL constraints directly. It uploads the test report. The [`main` ruleset](https://github.com/ronnyabuto/clinic-booking-api/rules/27901908) requires a pull request and a green **Tests and database checks** run against the latest base.
 
-Render watches **`main`** with `autoDeployTrigger: checksPass`. After a PR merges, GitHub Actions checks the resulting commit, and Render automatically deploys runtime changes once those checks pass. Failed checks block automatic deployment. The build filter in `render.yaml` excludes documentation, tests and development-only changes from deployment; CI still checks them.
+Railway watches **`main`** with **Wait for CI** enabled. When a pull request with runtime changes merges, Railway waits for the checks on the resulting `main` commit before deploying. The service watches `clinic/`, `migrations/`, `scripts/prepare-db.sh`, `alembic.ini`, `pyproject.toml`, `requirements.lock`, `Dockerfile`, and `.dockerignore`. CI still runs for documentation, tests, and development-only changes.
 
 ## Section 4 — AI Reflection
 

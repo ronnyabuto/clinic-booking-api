@@ -18,7 +18,11 @@ from clinic.schemas import (
 from clinic.service import BookingService
 
 router = APIRouter(responses={404: {"model": ErrorResponse}, 422: {"model": ErrorResponse}})
-write_errors = {409: {"model": ErrorResponse}, 503: {"model": ErrorResponse}}
+write_errors = {
+    400: {"model": ErrorResponse, "description": "Malformed JSON"},
+    409: {"model": ErrorResponse},
+    503: {"model": ErrorResponse},
+}
 
 
 def booking_service(request: Request) -> BookingService:

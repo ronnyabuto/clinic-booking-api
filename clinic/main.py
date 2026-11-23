@@ -43,15 +43,13 @@ def create_app(service: BookingService | None = None) -> FastAPI:
             {"location": list(item["loc"]), "message": item["msg"], "type": item["type"]}
             for item in error.errors()
         ]
+        if any(item["type"] == "json_invalid" for item in details):
+            status, code, message = 400, "invalid_json", "Request body is not valid JSON"
+        else:
+            status, code, message = 422, "invalid_request", "Request validation failed"
         return JSONResponse(
-            status_code=422,
-            content={
-                "error": {
-                    "code": "invalid_request",
-                    "message": "Request validation failed",
-                    "details": details,
-                }
-            },
+            status_code=status,
+            content={"error": {"code": code, "message": message, "details": details}},
         )
 
     return app
